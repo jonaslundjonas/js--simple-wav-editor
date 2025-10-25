@@ -96,6 +96,18 @@
         </div>
 
         <div class="control-panel">
+            <div class="control-group" id="record-group">
+                <h3>Record</h3>
+                <div class="button-group">
+                    <button class="btn btn-danger" id="record-btn" title="Start/Stop recording">🔴 Record</button>
+                    <span id="record-timer" style="margin-left: 10px; font-size: 16px; color: #ccc; align-self: center;">0:00</span>
+                </div>
+                <div class="input-group" style="margin-top: 10px;">
+                    <label for="audio-source" style="margin-right: 10px;">Source:</label>
+                    <select id="audio-source" class="btn" style="width: calc(100% - 70px); background-color: var(--secondary-color);"></select>
+                </div>
+            </div>
+
             <div class="control-group">
                 <h3>Selection</h3>
                 <div class="button-group">
@@ -155,6 +167,8 @@
         // --- Global Variables ---
         let wavesurfer = null; let audioContext = null; let originalBuffer = null;
         let currentBuffer = null; let loopEnabled = false; let currentFileName = "No file loaded";
+        let mediaRecorder = null; let recordedChunks = []; let isRecording = false;
+        let recordStartTime; let recordTimerInterval;
 
         // --- DOM Element References ---
         let fileDropElement, fileInputElement, fileInfoElement, statusBarElement; let timeDisplayElement;
@@ -168,6 +182,112 @@
         function initEventListeners() { if (fileDropElement) { fileDropElement.addEventListener("click", () => fileInputElement?.click()); fileDropElement.addEventListener("dragover", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.add("active"); }); fileDropElement.addEventListener("dragleave", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); }); fileDropElement.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); if (e.dataTransfer?.files?.length > 0) { handleFileUpload(e.dataTransfer.files[0]); } }); } else { console.error("File drop element not found"); } if (fileInputElement) { fileInputElement.addEventListener("change", e => { if (e.target instanceof HTMLInputElement && e.target.files?.length > 0) { handleFileUpload(e.target.files[0]); e.target.value = ''; } }); } else { console.error("File input element not found"); } gainAdjustSlider?.addEventListener("input", () => { if(gainAdjustValue && gainAdjustSlider) gainAdjustValue.textContent = gainAdjustSlider.value + " dB"; }); zoomSlider?.addEventListener("input", () => { if (!wavesurfer || !currentBuffer) return; const zoomVal = parseInt(zoomSlider.value); if (zoomValue) zoomValue.textContent = zoomVal; const minPxPerSec = 10, maxPxPerSec = 5000, range = maxPxPerSec - minPxPerSec; const scaledZoom = minPxPerSec + Math.pow(zoomVal / 500, 2) * range; wavesurfer.zoom(scaledZoom); }); console.log("UI event listeners initialized."); }
         function initTransportControls() { document.getElementById("play-btn")?.addEventListener("click", () => { if (!wavesurfer || !currentBuffer) return; const region = getSelectedRegion(); if (region) wavesurfer.play(region.start, region.end); else wavesurfer.play(); }); document.getElementById("pause-btn")?.addEventListener("click", () => { wavesurfer?.pause(); }); document.getElementById("stop-btn")?.addEventListener("click", () => { wavesurfer?.stop(); }); document.getElementById("save-wav-44-btn")?.addEventListener("click", () => saveAsWav(44100)); document.getElementById("save-wav-48-btn")?.addEventListener("click", () => saveAsWav(48000)); /* MP3 listener removed */ document.getElementById("loop-btn")?.addEventListener("click", () => { if (!currentBuffer) return; loopEnabled = !loopEnabled; const loopBtn = document.getElementById("loop-btn"); if (loopBtn) loopBtn.textContent = loopEnabled ? "Loop: On" : "Loop: Off"; setStatus(`Loop ${loopEnabled ? "enabled" : "disabled"}`); const region = getSelectedRegion(); if (region && wavesurfer?.regions?.list[region.id]) wavesurfer.regions.list[region.id].loop = loopEnabled; }); document.getElementById("select-all-btn")?.addEventListener("click", selectAll); document.getElementById("select-none-btn")?.addEventListener("click", clearSelection); document.getElementById("cut-btn")?.addEventListener("click", cutSelection); document.getElementById("reverse-btn")?.addEventListener("click", reverseAudio); document.getElementById("normalize-btn")?.addEventListener("click", normalizeAudio); document.getElementById("gain-apply-btn")?.addEventListener("click", applyGain); document.getElementById("fade-in-btn")?.addEventListener("click", fadeInAudio); document.getElementById("fade-out-btn")?.addEventListener("click", fadeOutAudio); console.log("Transport/effect control listeners initialized."); }
 
+        // --- Audio Recording Functions ---
+        function initAudioRecording() {
+            const recordBtn = document.getElementById("record-btn");
+            const audioSourceSelect = document.getElementById("audio-source");
+
+            if (!recordBtn || !audioSourceSelect) {
+                console.error("Recording UI elements not found.");
+                return;
+            }
+
+            recordBtn.addEventListener("click", () => {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            });
+
+            // Populate audio sources
+            navigator.mediaDevices.enumerateDevices()
+                .then(devices => {
+                    devices.forEach(device => {
+                        if (device.kind === 'audioinput') {
+                            const option = document.createElement("option");
+                            option.value = device.deviceId;
+                            option.text = device.label || `Microphone ${audioSourceSelect.length + 1}`;
+                            audioSourceSelect.appendChild(option);
+                        }
+                    });
+                })
+                .catch(err => {
+                    console.error("Error enumerating audio devices:", err);
+                    setStatus("Error: Could not list audio sources.");
+                });
+        }
+
+        // --- Audio Recording Functions ---
+        async function startRecording() {
+            const audioSourceSelect = document.getElementById("audio-source");
+            const deviceId = audioSourceSelect.value;
+            const constraints = {
+                audio: { deviceId: deviceId ? { exact: deviceId } : undefined }
+            };
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                isRecording = true;
+                recordedChunks = [];
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const recordedBlob = new Blob(recordedChunks, { type: "audio/wav" });
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        if (e.target && e.target.result instanceof ArrayBuffer) {
+                            audioContext.decodeAudioData(e.target.result).then(buffer => {
+                                currentBuffer = buffer;
+                                originalBuffer = createBufferCopy(buffer);
+                                wavesurfer.loadDecodedBuffer(buffer);
+                                updateFileInfo();
+                                enableControls();
+                            }).catch(error => {
+                                setStatus("Error decoding recorded audio.");
+                                console.error("Decode Error:", error);
+                            });
+                        }
+                    };
+                    reader.readAsArrayBuffer(recordedBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                setStatus("Recording...");
+                const recordBtn = document.getElementById("record-btn");
+                recordBtn.innerHTML = "⏹️ Stop";
+                recordStartTime = Date.now();
+                recordTimerInterval = setInterval(() => {
+                    const elapsedTime = Date.now() - recordStartTime;
+                    document.getElementById("record-timer").textContent = formatTime(elapsedTime / 1000);
+                }, 1000);
+                enableControls();
+            } catch (err) {
+                setStatus("Error starting recording.");
+                console.error("Error starting recording:", err);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                setStatus("Recording stopped.");
+                const recordBtn = document.getElementById("record-btn");
+                recordBtn.innerHTML = "🔴 Record";
+                clearInterval(recordTimerInterval);
+                document.getElementById("record-timer").textContent = "0:00";
+                enableControls();
+            }
+        }
+
         // --- UI Update Functions ---
         function showProcessing(message = "Processing...", showProgress = false) { if (!processingOverlay || !processingMessage || !processingProgressContainer || !processingProgressBar) return; processingMessage.textContent = message; processingProgressContainer.style.display = showProgress ? "block" : "none"; processingProgressBar.style.width = "0%"; processingOverlay.style.display = "flex"; allButtonsAndSliders?.forEach(el => el.disabled = true); if (fileDropElement) fileDropElement.style.pointerEvents = 'none'; setStatus(message); }
         function updateProcessingProgress(percentage) { if (processingProgressBar) { const clampedPercentage = Math.max(0, Math.min(100, percentage)); processingProgressBar.style.width = `${clampedPercentage}%`; } }
@@ -179,31 +299,38 @@
 
         // --- Control Enable/Disable Logic ---
         function enableControls() {
-             const audioLoaded = !!currentBuffer; const regionSelected = !!getSelectedRegion();
-             const isPlaying = wavesurfer && wavesurfer.isPlaying();
-             // No external library checks needed now
-             // console.log(`--- Running enableControls ---`);
-             // console.log(`States: audioLoaded=${audioLoaded}, regionSelected=${!!regionSelected}, isPlaying=${isPlaying}`);
+            const audioLoaded = !!currentBuffer;
+            const regionSelected = !!getSelectedRegion();
+            const isPlaying = wavesurfer && wavesurfer.isPlaying();
 
-             allButtonsAndSliders?.forEach(el => {
-                 let disable = false;
-                 if (!audioLoaded) { const allowWithoutAudio = ['file-input', 'file-drop']; if (!allowWithoutAudio.includes(el.id) && (el.classList.contains('btn') || el.type === 'range')) disable = true; }
-                 if (!disable) {
-                     switch (el.id) {
-                         case 'play-btn': disable = isPlaying; break;
-                         case 'pause-btn': disable = !isPlaying; break;
-                         // Save buttons require audio loaded
-                         case 'save-wav-44-btn': case 'save-wav-48-btn': disable = !audioLoaded; break;
-                         // MP3 button removed
-                         case 'select-none-btn': case 'cut-btn': case 'fade-in-btn': case 'fade-out-btn': disable = !regionSelected; break;
-                         // Default controls just need audio loaded (handled by initial check)
-                     }
-                 }
-                 if (el.disabled !== disable) el.disabled = disable; else if (disable && !el.disabled) el.disabled = true;
-             });
-             if (fileDropElement && processingOverlay && processingOverlay.style.display === 'none') fileDropElement.style.pointerEvents = 'auto';
-            // console.log("--- Finished enableControls ---");
-         }
+            allButtonsAndSliders?.forEach(el => {
+                let disable = false;
+                if (isRecording) {
+                    if (el.id !== 'record-btn') {
+                        disable = true;
+                    }
+                } else if (!audioLoaded) {
+                    const allowWithoutAudio = ['file-input', 'file-drop', 'record-btn', 'audio-source'];
+                    if (!allowWithoutAudio.includes(el.id) && (el.classList.contains('btn') || el.type === 'range')) {
+                        disable = true;
+                    }
+                }
+
+                if (!disable && !isRecording) {
+                    switch (el.id) {
+                        case 'play-btn': disable = isPlaying; break;
+                        case 'pause-btn': disable = !isPlaying; break;
+                        case 'save-wav-44-btn': case 'save-wav-48-btn': disable = !audioLoaded; break;
+                        case 'select-none-btn': case 'cut-btn': case 'fade-in-btn': case 'fade-out-btn': disable = !regionSelected; break;
+                    }
+                }
+                if (el.disabled !== disable) el.disabled = disable;
+            });
+
+            if (fileDropElement && processingOverlay && processingOverlay.style.display === 'none') {
+                fileDropElement.style.pointerEvents = 'auto';
+            }
+        }
 
         // --- File Handling & Buffer Copy ---
         function handleFileUpload(file) { if (!file) { setStatus("Error: No file selected"); return; } const fileType = file.type, fileNameLower = file.name.toLowerCase(); if (!fileType.match(/audio\/(wav|wave|x-wav)/i) && !fileNameLower.endsWith(".wav")) { setStatus("Error: Please select a valid WAV file (.wav)"); console.warn(`Rejected file: ${file.name}, type: ${file.type}`); return; } currentFileName = file.name; setStatus("Loading file: " + currentFileName); showProcessing("Loading and Decoding...", true); updateProcessingProgress(5); if (!audioContext) { try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); console.log("AudioContext initialized on demand."); } catch (error) { setStatus("Fatal Error: Web Audio API not supported."); console.error("Web Audio API error:", error); hideProcessing(); enableControls(); return; } } const reader = new FileReader(); reader.onload = (e) => { if (!e.target || !e.target.result || !(e.target.result instanceof ArrayBuffer)) { setStatus("Error reading file: Invalid result."); console.error("FileReader onload error."); hideProcessing(); enableControls(); return; } try { const arrayBuffer = e.target.result; updateProcessingProgress(30); console.log("File read, decoding..."); setStatus("Decoding audio data..."); audioContext.decodeAudioData(arrayBuffer).then(buffer => { updateProcessingProgress(70); console.log("Audio decoded."); originalBuffer = buffer; currentBuffer = createBufferCopy(buffer); if (!currentBuffer) throw new Error("Failed to copy buffer."); wavesurfer?.loadDecodedBuffer(currentBuffer); updateProcessingProgress(95); }).catch(error => { let errorMsg = `Error decoding audio: ${error.message}.`; if (error.message.toLowerCase().includes('encoding')) errorMsg += " File corrupt/unsupported format?"; else errorMsg += " Valid WAV?"; setStatus(errorMsg); console.error("Decode Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); }); } catch (error) { setStatus(`Error processing file data: ${error.message}`); console.error("File Processing Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); } }; reader.onerror = (event) => { const error = event.target?.error || new Error("Unknown FileReader error"); setStatus(`Error reading file: ${error.message}`); console.error("FileReader Error:", error); hideProcessing(); enableControls(); }; reader.onprogress = (event) => { if (event.lengthComputable) { let percentComplete = 5 + Math.round((event.loaded / event.total) * 25); updateProcessingProgress(percentComplete); } }; reader.readAsArrayBuffer(file); }
@@ -239,7 +366,7 @@
             console.log("DOM loaded. Initializing editor..."); initDomReferences();
             try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); console.log(`AudioContext OK. Rate: ${audioContext.sampleRate} Hz.`); }
             catch (e) { console.error("Web Audio API not supported.", e); setStatus("Fatal Error: Web Audio API not supported."); if(fileDropElement) fileDropElement.style.display = 'none'; document.querySelectorAll('.control-panel, .transport-controls, .waveform-container, .save-options').forEach(el => el.style.display = 'none'); return; }
-            initWaveSurfer(); initEventListeners(); initTransportControls();
+            initWaveSurfer(); initEventListeners(); initTransportControls(); initAudioRecording();
             if (!wavesurfer) { console.error("WaveSurfer init failed."); }
             enableControls(); // Set initial state
             setStatus("Ready - Drop or select WAV file"); console.log("Init sequence complete.");
