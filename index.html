@@ -11,7 +11,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.3/plugin/wavesurfer.timeline.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.3/plugin/wavesurfer.cursor.min.js"></script>
 
-    <!-- LAME MP3 Encoder REMOVED -->
+    <!-- LAME MP3 Encoder -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+
+    <!-- FFmpeg (for M4A) -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 
     <style>
         :root { --primary-color: #2a9d8f; --secondary-color: #1a2933; --background-color: #121212; --control-color: #457b9d; --highlight-color: #e76f51; --text-color: #e0e0e0; --button-hover: #1d7268; --control-hover: #3a6a8a; --danger-hover: #c7563a; --card-bg: #1e1e1e; --border-color: #333; }
@@ -68,8 +72,8 @@
         </div>
 
         <div class="file-drop" id="file-drop">
-            <p>Drag & drop a WAV file here or click to select</p>
-            <input type="file" id="file-input" accept=".wav,audio/wav,audio/wave" style="display:none" />
+            <p>Drag & drop a WAV/MP3/M4A file here or click to select</p>
+            <input type="file" id="file-input" accept=".wav,audio/wav,audio/wave,.mp3,audio/mpeg,.m4a,audio/mp4,audio/x-m4a" style="display:none" />
         </div>
 
         <div class="waveform-container">
@@ -91,7 +95,8 @@
              <div class="button-group">
                  <button class="btn btn-primary" id="save-wav-44-btn" disabled title="Save current audio as WAV (44.1kHz)">💾 Save WAV (44.1kHz)</button>
                  <button class="btn btn-primary" id="save-wav-48-btn" disabled title="Save current audio as WAV (48kHz)">💾 Save WAV (48kHz)</button>
-                 <!-- MP3 Button Removed -->
+                 <button class="btn btn-primary" id="save-mp3-320-btn" disabled title="Save current audio as MP3 (320kbps)">💾 Save MP3 (320kbps)</button>
+                 <button class="btn btn-primary" id="save-m4a-btn" disabled title="Save current audio as M4A">💾 Save M4A</button>
             </div>
         </div>
 
@@ -180,7 +185,7 @@
         function initDomReferences() { fileDropElement = document.getElementById("file-drop"); fileInputElement = document.getElementById("file-input"); fileInfoElement = document.getElementById("file-info"); statusBarElement = document.getElementById("status-bar"); timeDisplayElement = document.getElementById("time-display"); processingOverlay = document.getElementById("processing-overlay"); processingMessage = document.getElementById("processing-message"); processingProgressContainer = document.getElementById("processing-progress-container"); processingProgressBar = document.getElementById("processing-progress-bar"); gainAdjustSlider = document.getElementById("gain-adjust"); gainAdjustValue = document.getElementById("gain-adjust-value"); zoomSlider = document.getElementById("zoom-slider"); zoomValue = document.getElementById("zoom-value"); allButtonsAndSliders = document.querySelectorAll('.btn, input[type="range"]'); console.log("DOM references initialized."); }
         function initWaveSurfer() { const wfCont = document.getElementById("waveform"), tlCont = document.getElementById("timeline"); if (!wfCont || !tlCont) { console.error("Waveform/Timeline container not found!"); setStatus("Error: UI elements missing."); return; } try { wavesurfer = WaveSurfer.create({ container: wfCont, waveColor: "rgba(100, 160, 200, 0.8)", progressColor: "#2a9d8f", cursorColor: "#e76f51", cursorWidth: 2, height: 140, normalize: true, responsive: true, plugins: [ WaveSurfer.regions.create({ dragSelection: true, color: "rgba(231, 111, 81, 0.3)", handleStyle: { left: { backgroundColor: '#e76f51' }, right: { backgroundColor: '#e76f51' } }, loop: false }), WaveSurfer.timeline.create({ container: tlCont, primaryFontColor: "#ccc", secondaryFontColor: "#999", primaryColor: "#777", secondaryColor: "#555", height: 20 }), WaveSurfer.cursor.create({ showTime: true, opacity: 1, customShowTimeStyle: { "background-color": "#000", color: "#fff", padding: "2px 4px", "font-size": "10px", "border-radius": "2px" } }) ] }); console.log("WaveSurfer instance created."); wavesurfer.on("ready", () => { console.log("WaveSurfer ready."); updateFileInfo(); setStatus(`File loaded: ${currentFileName}`); if (zoomSlider) zoomSlider.value = 0; if (zoomValue) zoomValue.textContent = '0'; wavesurfer.zoom(0); updateTimeDisplay(); hideProcessing(); enableControls(); }); wavesurfer.on("audioprocess", updateTimeDisplay); wavesurfer.on("seek", updateTimeDisplay); wavesurfer.on("play", () => { setStatus("Playing"); enableControls(); }); wavesurfer.on("pause", () => { setStatus("Paused"); enableControls(); }); wavesurfer.on("stop", () => { setStatus("Stopped"); enableControls(); updateTimeDisplay(); wavesurfer.seekTo(0); }); wavesurfer.on("finish", () => { const region = getSelectedRegion(); if (loopEnabled) { if (region) setTimeout(() => wavesurfer?.play(region.start), 50); else setTimeout(() => wavesurfer?.play(), 50); } else { setStatus("Finished playing"); wavesurfer?.seekTo(0); enableControls(); updateTimeDisplay(); } }); wavesurfer.on("region-created", region => { const regions = wavesurfer.regions.list; Object.keys(regions).forEach(id => { if (id !== region.id) regions[id].remove(); }); region.loop = loopEnabled; enableControls(); }); wavesurfer.on("region-updated", region => { region.loop = loopEnabled; enableControls(); }); wavesurfer.on("region-dblclick", (region, event) => { event.stopPropagation(); wavesurfer?.play(region.start, region.end); setStatus(`Playing selection (${formatTime(region.start)} - ${formatTime(region.end)})`); }); wavesurfer.on("region-removed", () => enableControls()); wavesurfer.on("error", errorMsg => { setStatus(`WaveSurfer Error: ${errorMsg}`); console.error("WaveSurfer Error:", errorMsg); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); }); } catch (error) { console.error("Error initializing WaveSurfer:", error); setStatus("Fatal Error: Could not initialize audio waveform display."); enableControls(); } }
         function initEventListeners() { if (fileDropElement) { fileDropElement.addEventListener("click", () => fileInputElement?.click()); fileDropElement.addEventListener("dragover", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.add("active"); }); fileDropElement.addEventListener("dragleave", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); }); fileDropElement.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); if (e.dataTransfer?.files?.length > 0) { handleFileUpload(e.dataTransfer.files[0]); } }); } else { console.error("File drop element not found"); } if (fileInputElement) { fileInputElement.addEventListener("change", e => { if (e.target instanceof HTMLInputElement && e.target.files?.length > 0) { handleFileUpload(e.target.files[0]); e.target.value = ''; } }); } else { console.error("File input element not found"); } gainAdjustSlider?.addEventListener("input", () => { if(gainAdjustValue && gainAdjustSlider) gainAdjustValue.textContent = gainAdjustSlider.value + " dB"; }); zoomSlider?.addEventListener("input", () => { if (!wavesurfer || !currentBuffer) return; const zoomVal = parseInt(zoomSlider.value); if (zoomValue) zoomValue.textContent = zoomVal; const minPxPerSec = 10, maxPxPerSec = 5000, range = maxPxPerSec - minPxPerSec; const scaledZoom = minPxPerSec + Math.pow(zoomVal / 500, 2) * range; wavesurfer.zoom(scaledZoom); }); console.log("UI event listeners initialized."); }
-        function initTransportControls() { document.getElementById("play-btn")?.addEventListener("click", () => { if (!wavesurfer || !currentBuffer) return; const region = getSelectedRegion(); if (region) wavesurfer.play(region.start, region.end); else wavesurfer.play(); }); document.getElementById("pause-btn")?.addEventListener("click", () => { wavesurfer?.pause(); }); document.getElementById("stop-btn")?.addEventListener("click", () => { wavesurfer?.stop(); }); document.getElementById("save-wav-44-btn")?.addEventListener("click", () => saveAsWav(44100)); document.getElementById("save-wav-48-btn")?.addEventListener("click", () => saveAsWav(48000)); /* MP3 listener removed */ document.getElementById("loop-btn")?.addEventListener("click", () => { if (!currentBuffer) return; loopEnabled = !loopEnabled; const loopBtn = document.getElementById("loop-btn"); if (loopBtn) loopBtn.textContent = loopEnabled ? "Loop: On" : "Loop: Off"; setStatus(`Loop ${loopEnabled ? "enabled" : "disabled"}`); const region = getSelectedRegion(); if (region && wavesurfer?.regions?.list[region.id]) wavesurfer.regions.list[region.id].loop = loopEnabled; }); document.getElementById("select-all-btn")?.addEventListener("click", selectAll); document.getElementById("select-none-btn")?.addEventListener("click", clearSelection); document.getElementById("cut-btn")?.addEventListener("click", cutSelection); document.getElementById("reverse-btn")?.addEventListener("click", reverseAudio); document.getElementById("normalize-btn")?.addEventListener("click", normalizeAudio); document.getElementById("gain-apply-btn")?.addEventListener("click", applyGain); document.getElementById("fade-in-btn")?.addEventListener("click", fadeInAudio); document.getElementById("fade-out-btn")?.addEventListener("click", fadeOutAudio); console.log("Transport/effect control listeners initialized."); }
+        function initTransportControls() { document.getElementById("play-btn")?.addEventListener("click", () => { if (!wavesurfer || !currentBuffer) return; const region = getSelectedRegion(); if (region) wavesurfer.play(region.start, region.end); else wavesurfer.play(); }); document.getElementById("pause-btn")?.addEventListener("click", () => { wavesurfer?.pause(); }); document.getElementById("stop-btn")?.addEventListener("click", () => { wavesurfer?.stop(); }); document.getElementById("save-wav-44-btn")?.addEventListener("click", () => saveAsWav(44100)); document.getElementById("save-wav-48-btn")?.addEventListener("click", () => saveAsWav(48000)); document.getElementById("save-mp3-320-btn")?.addEventListener("click", () => saveAsMp3(320)); document.getElementById("save-m4a-btn")?.addEventListener("click", () => saveAsM4a()); document.getElementById("loop-btn")?.addEventListener("click", () => { if (!currentBuffer) return; loopEnabled = !loopEnabled; const loopBtn = document.getElementById("loop-btn"); if (loopBtn) loopBtn.textContent = loopEnabled ? "Loop: On" : "Loop: Off"; setStatus(`Loop ${loopEnabled ? "enabled" : "disabled"}`); const region = getSelectedRegion(); if (region && wavesurfer?.regions?.list[region.id]) wavesurfer.regions.list[region.id].loop = loopEnabled; }); document.getElementById("select-all-btn")?.addEventListener("click", selectAll); document.getElementById("select-none-btn")?.addEventListener("click", clearSelection); document.getElementById("cut-btn")?.addEventListener("click", cutSelection); document.getElementById("reverse-btn")?.addEventListener("click", reverseAudio); document.getElementById("normalize-btn")?.addEventListener("click", normalizeAudio); document.getElementById("gain-apply-btn")?.addEventListener("click", applyGain); document.getElementById("fade-in-btn")?.addEventListener("click", fadeInAudio); document.getElementById("fade-out-btn")?.addEventListener("click", fadeOutAudio); console.log("Transport/effect control listeners initialized."); }
 
         // --- Audio Recording Functions ---
         function initAudioRecording() {
@@ -320,7 +325,7 @@
                     switch (el.id) {
                         case 'play-btn': disable = isPlaying; break;
                         case 'pause-btn': disable = !isPlaying; break;
-                        case 'save-wav-44-btn': case 'save-wav-48-btn': disable = !audioLoaded; break;
+                        case 'save-wav-44-btn': case 'save-wav-48-btn': case 'save-mp3-320-btn': case 'save-m4a-btn': disable = !audioLoaded; break;
                         case 'select-none-btn': case 'cut-btn': case 'fade-in-btn': case 'fade-out-btn': disable = !regionSelected; break;
                     }
                 }
@@ -333,7 +338,7 @@
         }
 
         // --- File Handling & Buffer Copy ---
-        function handleFileUpload(file) { if (!file) { setStatus("Error: No file selected"); return; } const fileType = file.type, fileNameLower = file.name.toLowerCase(); if (!fileType.match(/audio\/(wav|wave|x-wav)/i) && !fileNameLower.endsWith(".wav")) { setStatus("Error: Please select a valid WAV file (.wav)"); console.warn(`Rejected file: ${file.name}, type: ${file.type}`); return; } currentFileName = file.name; setStatus("Loading file: " + currentFileName); showProcessing("Loading and Decoding...", true); updateProcessingProgress(5); if (!audioContext) { try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); console.log("AudioContext initialized on demand."); } catch (error) { setStatus("Fatal Error: Web Audio API not supported."); console.error("Web Audio API error:", error); hideProcessing(); enableControls(); return; } } const reader = new FileReader(); reader.onload = (e) => { if (!e.target || !e.target.result || !(e.target.result instanceof ArrayBuffer)) { setStatus("Error reading file: Invalid result."); console.error("FileReader onload error."); hideProcessing(); enableControls(); return; } try { const arrayBuffer = e.target.result; updateProcessingProgress(30); console.log("File read, decoding..."); setStatus("Decoding audio data..."); audioContext.decodeAudioData(arrayBuffer).then(buffer => { updateProcessingProgress(70); console.log("Audio decoded."); originalBuffer = buffer; currentBuffer = createBufferCopy(buffer); if (!currentBuffer) throw new Error("Failed to copy buffer."); wavesurfer?.loadDecodedBuffer(currentBuffer); updateProcessingProgress(95); }).catch(error => { let errorMsg = `Error decoding audio: ${error.message}.`; if (error.message.toLowerCase().includes('encoding')) errorMsg += " File corrupt/unsupported format?"; else errorMsg += " Valid WAV?"; setStatus(errorMsg); console.error("Decode Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); }); } catch (error) { setStatus(`Error processing file data: ${error.message}`); console.error("File Processing Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); } }; reader.onerror = (event) => { const error = event.target?.error || new Error("Unknown FileReader error"); setStatus(`Error reading file: ${error.message}`); console.error("FileReader Error:", error); hideProcessing(); enableControls(); }; reader.onprogress = (event) => { if (event.lengthComputable) { let percentComplete = 5 + Math.round((event.loaded / event.total) * 25); updateProcessingProgress(percentComplete); } }; reader.readAsArrayBuffer(file); }
+        function handleFileUpload(file) { if (!file) { setStatus("Error: No file selected"); return; } const fileType = file.type, fileNameLower = file.name.toLowerCase(); if (!fileType.match(/audio\/(wav|wave|x-wav|mpeg|mp3|mp4|x-m4a|aac)/i) && !fileNameLower.endsWith(".wav") && !fileNameLower.endsWith(".mp3") && !fileNameLower.endsWith(".m4a")) { setStatus("Error: Please select a valid WAV, MP3, or M4A file"); console.warn(`Rejected file: ${file.name}, type: ${file.type}`); return; } currentFileName = file.name; setStatus("Loading file: " + currentFileName); showProcessing("Loading and Decoding...", true); updateProcessingProgress(5); if (!audioContext) { try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); console.log("AudioContext initialized on demand."); } catch (error) { setStatus("Fatal Error: Web Audio API not supported."); console.error("Web Audio API error:", error); hideProcessing(); enableControls(); return; } } const reader = new FileReader(); reader.onload = (e) => { if (!e.target || !e.target.result || !(e.target.result instanceof ArrayBuffer)) { setStatus("Error reading file: Invalid result."); console.error("FileReader onload error."); hideProcessing(); enableControls(); return; } try { const arrayBuffer = e.target.result; updateProcessingProgress(30); console.log("File read, decoding..."); setStatus("Decoding audio data..."); audioContext.decodeAudioData(arrayBuffer).then(buffer => { updateProcessingProgress(70); console.log("Audio decoded."); originalBuffer = buffer; currentBuffer = createBufferCopy(buffer); if (!currentBuffer) throw new Error("Failed to copy buffer."); wavesurfer?.loadDecodedBuffer(currentBuffer); updateProcessingProgress(95); }).catch(error => { let errorMsg = `Error decoding audio: ${error.message}.`; if (error.message.toLowerCase().includes('encoding')) errorMsg += " File corrupt/unsupported format?"; else errorMsg += " Valid audio file?"; setStatus(errorMsg); console.error("Decode Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); }); } catch (error) { setStatus(`Error processing file data: ${error.message}`); console.error("File Processing Error:", error); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); } }; reader.onerror = (event) => { const error = event.target?.error || new Error("Unknown FileReader error"); setStatus(`Error reading file: ${error.message}`); console.error("FileReader Error:", error); hideProcessing(); enableControls(); }; reader.onprogress = (event) => { if (event.lengthComputable) { let percentComplete = 5 + Math.round((event.loaded / event.total) * 25); updateProcessingProgress(percentComplete); } }; reader.readAsArrayBuffer(file); }
         function createBufferCopy(sourceBuffer) { if (!audioContext) { console.error("Cannot copy: No AudioContext."); setStatus("Error: Audio system not ready."); return null; } if (!sourceBuffer || !(sourceBuffer instanceof AudioBuffer)) { console.error("Cannot copy: Invalid sourceBuffer."); setStatus("Error: Cannot copy invalid audio."); return null; } try { const newBuffer = audioContext.createBuffer(sourceBuffer.numberOfChannels, sourceBuffer.length, sourceBuffer.sampleRate); for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel++) { const channelData = sourceBuffer.getChannelData(channel); newBuffer.copyToChannel(channelData, channel, 0); } return newBuffer; } catch (error) { console.error("Error copying AudioBuffer:", error); setStatus("Error: Failed to duplicate audio data."); return null; } }
 
         // --- Selection Functions ---
@@ -352,8 +357,148 @@
 
         // --- Save Functionality ---
         /** Saves current buffer as WAV at specified sample rate */
-        function saveAsWav(targetSampleRate = 44100) { if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; } const rateString = targetSampleRate === 48000 ? "48kHz" : "44.1kHz"; showProcessing(`Preparing WAV (${rateString})...`, true); setStatus(`Saving audio as WAV (${rateString})...`); updateProcessingProgress(5); setTimeout(async () => { try { let bufferToSave = currentBuffer; if (currentBuffer.sampleRate !== targetSampleRate) { setStatus(`Resampling to ${targetSampleRate}Hz...`); console.log(`Resampling from ${currentBuffer.sampleRate}Hz to ${targetSampleRate}Hz...`); updateProcessingProgress(10); const resampledBuffer = await resampleBufferHQ(currentBuffer, targetSampleRate); if (!resampledBuffer) throw new Error("Resampling failed."); bufferToSave = resampledBuffer; console.log("Resampling complete."); updateProcessingProgress(40); setStatus("Resampling complete. Encoding WAV..."); } else { console.log(`Sample rate already ${targetSampleRate}Hz.`); updateProcessingProgress(40); setStatus("Encoding WAV..."); } console.log("Encoding WAV blob..."); const wavBlob = audioBufferToWavBlob(bufferToSave); if (!wavBlob) throw new Error("Failed to encode WAV."); console.log(`WAV Blob created: size=${wavBlob.size}`); updateProcessingProgress(90); const url = URL.createObjectURL(wavBlob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; const baseName = currentFileName.toLowerCase().endsWith('.wav') ? currentFileName.substring(0, currentFileName.length - 4) : (currentFileName || 'audio'); const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); a.download = `${baseName}_edited_${rateString}_${timestamp}.wav`; document.body.appendChild(a); console.log(`Triggering download: ${a.download}`); a.click(); setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); console.log("Download link cleaned up."); } catch (cleanupError) { console.warn("Cleanup error:", cleanupError); } setStatus(`WAV file (${rateString}) saved successfully`); updateProcessingProgress(100); hideProcessing(); }, 200); } catch (error) { setStatus(`Error saving WAV: ${error.message}`); console.error("Save WAV Error:", error); hideProcessing(); } }, 50); }
-        // saveAsMp3 function REMOVED
+        function saveAsWav(targetSampleRate = 44100) { if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; } const rateString = targetSampleRate === 48000 ? "48kHz" : "44.1kHz"; showProcessing(`Preparing WAV (${rateString})...`, true); setStatus(`Saving audio as WAV (${rateString})...`); updateProcessingProgress(5); setTimeout(async () => { try { let bufferToSave = currentBuffer; if (currentBuffer.sampleRate !== targetSampleRate) { setStatus(`Resampling to ${targetSampleRate}Hz...`); console.log(`Resampling from ${currentBuffer.sampleRate}Hz to ${targetSampleRate}Hz...`); updateProcessingProgress(10); const resampledBuffer = await resampleBufferHQ(currentBuffer, targetSampleRate); if (!resampledBuffer) throw new Error("Resampling failed."); bufferToSave = resampledBuffer; console.log("Resampling complete."); updateProcessingProgress(40); setStatus("Resampling complete. Encoding WAV..."); } else { console.log(`Sample rate already ${targetSampleRate}Hz.`); updateProcessingProgress(40); setStatus("Encoding WAV..."); } console.log("Encoding WAV blob..."); const wavBlob = audioBufferToWavBlob(bufferToSave); if (!wavBlob) throw new Error("Failed to encode WAV."); console.log(`WAV Blob created: size=${wavBlob.size}`); updateProcessingProgress(90); const url = URL.createObjectURL(wavBlob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio'; const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); a.download = `${baseName}_edited_${rateString}_${timestamp}.wav`; document.body.appendChild(a); console.log(`Triggering download: ${a.download}`); a.click(); setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); console.log("Download link cleaned up."); } catch (cleanupError) { console.warn("Cleanup error:", cleanupError); } setStatus(`WAV file (${rateString}) saved successfully`); updateProcessingProgress(100); hideProcessing(); }, 200); } catch (error) { setStatus(`Error saving WAV: ${error.message}`); console.error("Save WAV Error:", error); hideProcessing(); } }, 50); }
+        async function saveAsM4a() {
+            if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; }
+            if (typeof FFmpeg === 'undefined' || !FFmpeg.createFFmpeg) { setStatus("Error: FFmpeg encoder not loaded"); return; }
+
+            showProcessing("Encoding M4A (this may take a while)...", true);
+            updateProcessingProgress(5);
+
+            setTimeout(async () => {
+                try {
+                    const wavBlob = audioBufferToWavBlob(currentBuffer);
+                    if (!wavBlob) throw new Error("Failed to create temporary WAV.");
+
+                    const ffmpeg = FFmpeg.createFFmpeg({ log: true });
+                    updateProcessingProgress(15);
+                    await ffmpeg.load();
+                    updateProcessingProgress(30);
+
+                    ffmpeg.setProgress(({ ratio }) => {
+                        updateProcessingProgress(30 + Math.round(ratio * 60));
+                    });
+
+                    const wavData = new Uint8Array(await wavBlob.arrayBuffer());
+                    ffmpeg.FS('writeFile', 'input.wav', wavData);
+
+                    await ffmpeg.run('-i', 'input.wav', '-c:a', 'aac', '-b:a', '192k', 'output.m4a');
+
+                    const m4aData = ffmpeg.FS('readFile', 'output.m4a');
+
+                    updateProcessingProgress(95);
+
+                    const blob = new Blob([m4aData.buffer], { type: 'audio/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio';
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    a.download = `${baseName}_edited_${timestamp}.m4a`;
+                    document.body.appendChild(a);
+                    a.click();
+
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        setStatus(`M4A file saved successfully`);
+                        updateProcessingProgress(100);
+                        hideProcessing();
+                    }, 200);
+
+                } catch (error) {
+                    setStatus(`Error saving M4A: ${error.message}`);
+                    console.error("Save M4A Error:", error);
+                    hideProcessing();
+                }
+            }, 50);
+        }
+
+        function saveAsMp3(kbps = 128) {
+            if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; }
+            if (typeof lamejs === 'undefined') { setStatus("Error: MP3 encoder not loaded"); return; }
+
+            const channels = currentBuffer.numberOfChannels;
+            const sampleRate = currentBuffer.sampleRate;
+            showProcessing(`Encoding MP3 (${kbps}kbps)...`, true);
+            updateProcessingProgress(5);
+
+            setTimeout(() => {
+                try {
+                    const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+                    const mp3Data = [];
+                    const sampleBlockSize = 1152;
+
+                    let left = currentBuffer.getChannelData(0);
+                    let right = channels > 1 ? currentBuffer.getChannelData(1) : left;
+
+                    // Convert Float32 to Int16
+                    const floatToInt16 = (f32) => {
+                        const len = f32.length;
+                        const i16 = new Int16Array(len);
+                        for (let i = 0; i < len; i++) {
+                            const s = Math.max(-1, Math.min(1, f32[i]));
+                            i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+                        return i16;
+                    };
+
+                    const leftInt16 = floatToInt16(left);
+                    const rightInt16 = channels > 1 ? floatToInt16(right) : leftInt16;
+
+                    updateProcessingProgress(20);
+
+                    for (let i = 0; i < leftInt16.length; i += sampleBlockSize) {
+                        const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
+                        const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+                        let mp3buf;
+                        if (channels === 1) {
+                            mp3buf = mp3encoder.encodeBuffer(leftChunk);
+                        } else {
+                            mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+                        }
+                        if (mp3buf.length > 0) {
+                            mp3Data.push(mp3buf);
+                        }
+                        if (i % (sampleBlockSize * 100) === 0) {
+                            updateProcessingProgress(20 + Math.floor((i / leftInt16.length) * 70));
+                        }
+                    }
+
+                    const mp3buf = mp3encoder.flush();
+                    if (mp3buf.length > 0) {
+                        mp3Data.push(mp3buf);
+                    }
+
+                    updateProcessingProgress(95);
+
+                    const blob = new Blob(mp3Data, { type: 'audio/mp3' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio';
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    a.download = `${baseName}_edited_${kbps}kbps_${timestamp}.mp3`;
+                    document.body.appendChild(a);
+                    a.click();
+
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        setStatus(`MP3 file (${kbps}kbps) saved successfully`);
+                        updateProcessingProgress(100);
+                        hideProcessing();
+                    }, 200);
+
+                } catch (error) {
+                    setStatus(`Error saving MP3: ${error.message}`);
+                    console.error("Save MP3 Error:", error);
+                    hideProcessing();
+                }
+            }, 50);
+        }
         /** Resamples using OfflineAudioContext (Higher Quality) */
         async function resampleBufferHQ(buffer, targetSampleRate) { if (!audioContext) { console.error("Resampling failed: No AudioContext."); setStatus("Error: Audio system not ready."); return null; } if (buffer.sampleRate === targetSampleRate) { return buffer; } const originalLength = buffer.length, numChannels = buffer.numberOfChannels; const newLength = Math.round(originalLength * targetSampleRate / buffer.sampleRate); if (newLength <= 0) { console.error("Resampling failed: Invalid new length."); setStatus("Error: Resampling resulted in invalid length."); return null; } try { const offlineCtx = new OfflineAudioContext(numChannels, newLength, targetSampleRate); const bufferSource = offlineCtx.createBufferSource(); bufferSource.buffer = buffer; bufferSource.connect(offlineCtx.destination); bufferSource.start(0); console.log(`Starting offline rendering for resampling to ${targetSampleRate}Hz...`); const resampled = await offlineCtx.startRendering(); console.log("Offline rendering complete."); return resampled; } catch (error) { console.error("Error during HQ resampling:", error); console.warn("OfflineAudioContext resampling failed, falling back to linear interpolation."); setStatus(`Warning: Resampling quality reduced. ${error.message}`); return resampleBufferLinear(buffer, targetSampleRate); } }
         /** Resamples using linear interpolation (Fallback) */
