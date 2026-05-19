@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WAV Audio Editor</title>
+    <title>Easy Audio Editor</title>
 
     <!-- Wavesurfer.js and Plugins -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.3/wavesurfer.min.js"></script>
@@ -67,7 +67,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="title">WAV Audio Editor</div>
+            <div class="title">Easy Audio Editor</div>
             <div class="file-info" id="file-info">No file loaded</div>
         </div>
 
@@ -370,7 +370,10 @@
                     const wavBlob = audioBufferToWavBlob(currentBuffer);
                     if (!wavBlob) throw new Error("Failed to create temporary WAV.");
 
-                    const ffmpeg = FFmpeg.createFFmpeg({ log: true });
+                    const ffmpeg = FFmpeg.createFFmpeg({
+                        log: true,
+                        corePath: "https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js",
+                    });
                     updateProcessingProgress(15);
                     await ffmpeg.load();
                     updateProcessingProgress(30);
@@ -449,48 +452,56 @@
 
                     updateProcessingProgress(20);
 
-                    for (let i = 0; i < leftInt16.length; i += sampleBlockSize) {
-                        const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
-                        const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
-                        let mp3buf;
-                        if (channels === 1) {
-                            mp3buf = mp3encoder.encodeBuffer(leftChunk);
-                        } else {
-                            mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+                    let i = 0;
+                    const encodeChunk = () => {
+                        const chunksToProcess = 50; // Process multiple blocks per frame
+                        for (let j = 0; j < chunksToProcess && i < leftInt16.length; j++, i += sampleBlockSize) {
+                            const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
+                            const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+                            let mp3buf;
+                            if (channels === 1) {
+                                mp3buf = mp3encoder.encodeBuffer(leftChunk);
+                            } else {
+                                mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+                            }
+                            if (mp3buf.length > 0) {
+                                mp3Data.push(mp3buf);
+                            }
                         }
-                        if (mp3buf.length > 0) {
-                            mp3Data.push(mp3buf);
-                        }
-                        if (i % (sampleBlockSize * 100) === 0) {
+
+                        if (i < leftInt16.length) {
                             updateProcessingProgress(20 + Math.floor((i / leftInt16.length) * 70));
+                            setTimeout(encodeChunk, 0); // Yield to main thread
+                        } else {
+                            const mp3buf = mp3encoder.flush();
+                            if (mp3buf.length > 0) {
+                                mp3Data.push(mp3buf);
+                            }
+
+                            updateProcessingProgress(95);
+
+                            const blob = new Blob(mp3Data, { type: 'audio/mp3' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.style.display = "none";
+                            a.href = url;
+                            const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio';
+                            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                            a.download = `${baseName}_edited_${kbps}kbps_${timestamp}.mp3`;
+                            document.body.appendChild(a);
+                            a.click();
+
+                            setTimeout(() => {
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                                setStatus(`MP3 file (${kbps}kbps) saved successfully`);
+                                updateProcessingProgress(100);
+                                hideProcessing();
+                            }, 200);
                         }
-                    }
+                    };
 
-                    const mp3buf = mp3encoder.flush();
-                    if (mp3buf.length > 0) {
-                        mp3Data.push(mp3buf);
-                    }
-
-                    updateProcessingProgress(95);
-
-                    const blob = new Blob(mp3Data, { type: 'audio/mp3' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.style.display = "none";
-                    a.href = url;
-                    const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio';
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    a.download = `${baseName}_edited_${kbps}kbps_${timestamp}.mp3`;
-                    document.body.appendChild(a);
-                    a.click();
-
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        setStatus(`MP3 file (${kbps}kbps) saved successfully`);
-                        updateProcessingProgress(100);
-                        hideProcessing();
-                    }, 200);
+                    encodeChunk();
 
                 } catch (error) {
                     setStatus(`Error saving MP3: ${error.message}`);
