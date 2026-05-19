@@ -14,9 +14,6 @@
     <!-- LAME MP3 Encoder -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
 
-    <!-- FFmpeg (for M4A) -->
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
-
     <style>
         :root { --primary-color: #2a9d8f; --secondary-color: #1a2933; --background-color: #121212; --control-color: #457b9d; --highlight-color: #e76f51; --text-color: #e0e0e0; --button-hover: #1d7268; --control-hover: #3a6a8a; --danger-hover: #c7563a; --card-bg: #1e1e1e; --border-color: #333; }
         body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: var(--background-color); color: var(--text-color); padding-bottom: 60px; }
@@ -96,7 +93,6 @@
                  <button class="btn btn-primary" id="save-wav-44-btn" disabled title="Save current audio as WAV (44.1kHz)">💾 Save WAV (44.1kHz)</button>
                  <button class="btn btn-primary" id="save-wav-48-btn" disabled title="Save current audio as WAV (48kHz)">💾 Save WAV (48kHz)</button>
                  <button class="btn btn-primary" id="save-mp3-320-btn" disabled title="Save current audio as MP3 (320kbps)">💾 Save MP3 (320kbps)</button>
-                 <button class="btn btn-primary" id="save-m4a-btn" disabled title="Save current audio as M4A">💾 Save M4A</button>
             </div>
         </div>
 
@@ -185,7 +181,7 @@
         function initDomReferences() { fileDropElement = document.getElementById("file-drop"); fileInputElement = document.getElementById("file-input"); fileInfoElement = document.getElementById("file-info"); statusBarElement = document.getElementById("status-bar"); timeDisplayElement = document.getElementById("time-display"); processingOverlay = document.getElementById("processing-overlay"); processingMessage = document.getElementById("processing-message"); processingProgressContainer = document.getElementById("processing-progress-container"); processingProgressBar = document.getElementById("processing-progress-bar"); gainAdjustSlider = document.getElementById("gain-adjust"); gainAdjustValue = document.getElementById("gain-adjust-value"); zoomSlider = document.getElementById("zoom-slider"); zoomValue = document.getElementById("zoom-value"); allButtonsAndSliders = document.querySelectorAll('.btn, input[type="range"]'); console.log("DOM references initialized."); }
         function initWaveSurfer() { const wfCont = document.getElementById("waveform"), tlCont = document.getElementById("timeline"); if (!wfCont || !tlCont) { console.error("Waveform/Timeline container not found!"); setStatus("Error: UI elements missing."); return; } try { wavesurfer = WaveSurfer.create({ container: wfCont, waveColor: "rgba(100, 160, 200, 0.8)", progressColor: "#2a9d8f", cursorColor: "#e76f51", cursorWidth: 2, height: 140, normalize: true, responsive: true, plugins: [ WaveSurfer.regions.create({ dragSelection: true, color: "rgba(231, 111, 81, 0.3)", handleStyle: { left: { backgroundColor: '#e76f51' }, right: { backgroundColor: '#e76f51' } }, loop: false }), WaveSurfer.timeline.create({ container: tlCont, primaryFontColor: "#ccc", secondaryFontColor: "#999", primaryColor: "#777", secondaryColor: "#555", height: 20 }), WaveSurfer.cursor.create({ showTime: true, opacity: 1, customShowTimeStyle: { "background-color": "#000", color: "#fff", padding: "2px 4px", "font-size": "10px", "border-radius": "2px" } }) ] }); console.log("WaveSurfer instance created."); wavesurfer.on("ready", () => { console.log("WaveSurfer ready."); updateFileInfo(); setStatus(`File loaded: ${currentFileName}`); if (zoomSlider) zoomSlider.value = 0; if (zoomValue) zoomValue.textContent = '0'; wavesurfer.zoom(0); updateTimeDisplay(); hideProcessing(); enableControls(); }); wavesurfer.on("audioprocess", updateTimeDisplay); wavesurfer.on("seek", updateTimeDisplay); wavesurfer.on("play", () => { setStatus("Playing"); enableControls(); }); wavesurfer.on("pause", () => { setStatus("Paused"); enableControls(); }); wavesurfer.on("stop", () => { setStatus("Stopped"); enableControls(); updateTimeDisplay(); wavesurfer.seekTo(0); }); wavesurfer.on("finish", () => { const region = getSelectedRegion(); if (loopEnabled) { if (region) setTimeout(() => wavesurfer?.play(region.start), 50); else setTimeout(() => wavesurfer?.play(), 50); } else { setStatus("Finished playing"); wavesurfer?.seekTo(0); enableControls(); updateTimeDisplay(); } }); wavesurfer.on("region-created", region => { const regions = wavesurfer.regions.list; Object.keys(regions).forEach(id => { if (id !== region.id) regions[id].remove(); }); region.loop = loopEnabled; enableControls(); }); wavesurfer.on("region-updated", region => { region.loop = loopEnabled; enableControls(); }); wavesurfer.on("region-dblclick", (region, event) => { event.stopPropagation(); wavesurfer?.play(region.start, region.end); setStatus(`Playing selection (${formatTime(region.start)} - ${formatTime(region.end)})`); }); wavesurfer.on("region-removed", () => enableControls()); wavesurfer.on("error", errorMsg => { setStatus(`WaveSurfer Error: ${errorMsg}`); console.error("WaveSurfer Error:", errorMsg); currentBuffer = null; originalBuffer = null; updateFileInfo(); updateTimeDisplay(); hideProcessing(); enableControls(); }); } catch (error) { console.error("Error initializing WaveSurfer:", error); setStatus("Fatal Error: Could not initialize audio waveform display."); enableControls(); } }
         function initEventListeners() { if (fileDropElement) { fileDropElement.addEventListener("click", () => fileInputElement?.click()); fileDropElement.addEventListener("dragover", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.add("active"); }); fileDropElement.addEventListener("dragleave", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); }); fileDropElement.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); fileDropElement.classList.remove("active"); if (e.dataTransfer?.files?.length > 0) { handleFileUpload(e.dataTransfer.files[0]); } }); } else { console.error("File drop element not found"); } if (fileInputElement) { fileInputElement.addEventListener("change", e => { if (e.target instanceof HTMLInputElement && e.target.files?.length > 0) { handleFileUpload(e.target.files[0]); e.target.value = ''; } }); } else { console.error("File input element not found"); } gainAdjustSlider?.addEventListener("input", () => { if(gainAdjustValue && gainAdjustSlider) gainAdjustValue.textContent = gainAdjustSlider.value + " dB"; }); zoomSlider?.addEventListener("input", () => { if (!wavesurfer || !currentBuffer) return; const zoomVal = parseInt(zoomSlider.value); if (zoomValue) zoomValue.textContent = zoomVal; const minPxPerSec = 10, maxPxPerSec = 5000, range = maxPxPerSec - minPxPerSec; const scaledZoom = minPxPerSec + Math.pow(zoomVal / 500, 2) * range; wavesurfer.zoom(scaledZoom); }); console.log("UI event listeners initialized."); }
-        function initTransportControls() { document.getElementById("play-btn")?.addEventListener("click", () => { if (!wavesurfer || !currentBuffer) return; const region = getSelectedRegion(); if (region) wavesurfer.play(region.start, region.end); else wavesurfer.play(); }); document.getElementById("pause-btn")?.addEventListener("click", () => { wavesurfer?.pause(); }); document.getElementById("stop-btn")?.addEventListener("click", () => { wavesurfer?.stop(); }); document.getElementById("save-wav-44-btn")?.addEventListener("click", () => saveAsWav(44100)); document.getElementById("save-wav-48-btn")?.addEventListener("click", () => saveAsWav(48000)); document.getElementById("save-mp3-320-btn")?.addEventListener("click", () => saveAsMp3(320)); document.getElementById("save-m4a-btn")?.addEventListener("click", () => saveAsM4a()); document.getElementById("loop-btn")?.addEventListener("click", () => { if (!currentBuffer) return; loopEnabled = !loopEnabled; const loopBtn = document.getElementById("loop-btn"); if (loopBtn) loopBtn.textContent = loopEnabled ? "Loop: On" : "Loop: Off"; setStatus(`Loop ${loopEnabled ? "enabled" : "disabled"}`); const region = getSelectedRegion(); if (region && wavesurfer?.regions?.list[region.id]) wavesurfer.regions.list[region.id].loop = loopEnabled; }); document.getElementById("select-all-btn")?.addEventListener("click", selectAll); document.getElementById("select-none-btn")?.addEventListener("click", clearSelection); document.getElementById("cut-btn")?.addEventListener("click", cutSelection); document.getElementById("reverse-btn")?.addEventListener("click", reverseAudio); document.getElementById("normalize-btn")?.addEventListener("click", normalizeAudio); document.getElementById("gain-apply-btn")?.addEventListener("click", applyGain); document.getElementById("fade-in-btn")?.addEventListener("click", fadeInAudio); document.getElementById("fade-out-btn")?.addEventListener("click", fadeOutAudio); console.log("Transport/effect control listeners initialized."); }
+        function initTransportControls() { document.getElementById("play-btn")?.addEventListener("click", () => { if (!wavesurfer || !currentBuffer) return; const region = getSelectedRegion(); if (region) wavesurfer.play(region.start, region.end); else wavesurfer.play(); }); document.getElementById("pause-btn")?.addEventListener("click", () => { wavesurfer?.pause(); }); document.getElementById("stop-btn")?.addEventListener("click", () => { wavesurfer?.stop(); }); document.getElementById("save-wav-44-btn")?.addEventListener("click", () => saveAsWav(44100)); document.getElementById("save-wav-48-btn")?.addEventListener("click", () => saveAsWav(48000)); document.getElementById("save-mp3-320-btn")?.addEventListener("click", () => saveAsMp3(320)); document.getElementById("loop-btn")?.addEventListener("click", () => { if (!currentBuffer) return; loopEnabled = !loopEnabled; const loopBtn = document.getElementById("loop-btn"); if (loopBtn) loopBtn.textContent = loopEnabled ? "Loop: On" : "Loop: Off"; setStatus(`Loop ${loopEnabled ? "enabled" : "disabled"}`); const region = getSelectedRegion(); if (region && wavesurfer?.regions?.list[region.id]) wavesurfer.regions.list[region.id].loop = loopEnabled; }); document.getElementById("select-all-btn")?.addEventListener("click", selectAll); document.getElementById("select-none-btn")?.addEventListener("click", clearSelection); document.getElementById("cut-btn")?.addEventListener("click", cutSelection); document.getElementById("reverse-btn")?.addEventListener("click", reverseAudio); document.getElementById("normalize-btn")?.addEventListener("click", normalizeAudio); document.getElementById("gain-apply-btn")?.addEventListener("click", applyGain); document.getElementById("fade-in-btn")?.addEventListener("click", fadeInAudio); document.getElementById("fade-out-btn")?.addEventListener("click", fadeOutAudio); console.log("Transport/effect control listeners initialized."); }
 
         // --- Audio Recording Functions ---
         function initAudioRecording() {
@@ -325,7 +321,7 @@
                     switch (el.id) {
                         case 'play-btn': disable = isPlaying; break;
                         case 'pause-btn': disable = !isPlaying; break;
-                        case 'save-wav-44-btn': case 'save-wav-48-btn': case 'save-mp3-320-btn': case 'save-m4a-btn': disable = !audioLoaded; break;
+                        case 'save-wav-44-btn': case 'save-wav-48-btn': case 'save-mp3-320-btn': disable = !audioLoaded; break;
                         case 'select-none-btn': case 'cut-btn': case 'fade-in-btn': case 'fade-out-btn': disable = !regionSelected; break;
                     }
                 }
@@ -358,66 +354,6 @@
         // --- Save Functionality ---
         /** Saves current buffer as WAV at specified sample rate */
         function saveAsWav(targetSampleRate = 44100) { if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; } const rateString = targetSampleRate === 48000 ? "48kHz" : "44.1kHz"; showProcessing(`Preparing WAV (${rateString})...`, true); setStatus(`Saving audio as WAV (${rateString})...`); updateProcessingProgress(5); setTimeout(async () => { try { let bufferToSave = currentBuffer; if (currentBuffer.sampleRate !== targetSampleRate) { setStatus(`Resampling to ${targetSampleRate}Hz...`); console.log(`Resampling from ${currentBuffer.sampleRate}Hz to ${targetSampleRate}Hz...`); updateProcessingProgress(10); const resampledBuffer = await resampleBufferHQ(currentBuffer, targetSampleRate); if (!resampledBuffer) throw new Error("Resampling failed."); bufferToSave = resampledBuffer; console.log("Resampling complete."); updateProcessingProgress(40); setStatus("Resampling complete. Encoding WAV..."); } else { console.log(`Sample rate already ${targetSampleRate}Hz.`); updateProcessingProgress(40); setStatus("Encoding WAV..."); } console.log("Encoding WAV blob..."); const wavBlob = audioBufferToWavBlob(bufferToSave); if (!wavBlob) throw new Error("Failed to encode WAV."); console.log(`WAV Blob created: size=${wavBlob.size}`); updateProcessingProgress(90); const url = URL.createObjectURL(wavBlob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio'; const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); a.download = `${baseName}_edited_${rateString}_${timestamp}.wav`; document.body.appendChild(a); console.log(`Triggering download: ${a.download}`); a.click(); setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); console.log("Download link cleaned up."); } catch (cleanupError) { console.warn("Cleanup error:", cleanupError); } setStatus(`WAV file (${rateString}) saved successfully`); updateProcessingProgress(100); hideProcessing(); }, 200); } catch (error) { setStatus(`Error saving WAV: ${error.message}`); console.error("Save WAV Error:", error); hideProcessing(); } }, 50); }
-        async function saveAsM4a() {
-            if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; }
-            if (typeof FFmpeg === 'undefined' || !FFmpeg.createFFmpeg) { setStatus("Error: FFmpeg encoder not loaded"); return; }
-
-            showProcessing("Encoding M4A (this may take a while)...", true);
-            updateProcessingProgress(5);
-
-            setTimeout(async () => {
-                try {
-                    const wavBlob = audioBufferToWavBlob(currentBuffer);
-                    if (!wavBlob) throw new Error("Failed to create temporary WAV.");
-
-                    const ffmpeg = FFmpeg.createFFmpeg({
-                        log: true,
-                        corePath: "https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js",
-                    });
-                    updateProcessingProgress(15);
-                    await ffmpeg.load();
-                    updateProcessingProgress(30);
-
-                    ffmpeg.setProgress(({ ratio }) => {
-                        updateProcessingProgress(30 + Math.round(ratio * 60));
-                    });
-
-                    const wavData = new Uint8Array(await wavBlob.arrayBuffer());
-                    ffmpeg.FS('writeFile', 'input.wav', wavData);
-
-                    await ffmpeg.run('-i', 'input.wav', '-c:a', 'aac', '-b:a', '192k', 'output.m4a');
-
-                    const m4aData = ffmpeg.FS('readFile', 'output.m4a');
-
-                    updateProcessingProgress(95);
-
-                    const blob = new Blob([m4aData.buffer], { type: 'audio/mp4' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.style.display = "none";
-                    a.href = url;
-                    const baseName = currentFileName.replace(/\.[^/.]+$/, "") || 'audio';
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    a.download = `${baseName}_edited_${timestamp}.m4a`;
-                    document.body.appendChild(a);
-                    a.click();
-
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        setStatus(`M4A file saved successfully`);
-                        updateProcessingProgress(100);
-                        hideProcessing();
-                    }, 200);
-
-                } catch (error) {
-                    setStatus(`Error saving M4A: ${error.message}`);
-                    console.error("Save M4A Error:", error);
-                    hideProcessing();
-                }
-            }, 50);
-        }
-
         function saveAsMp3(kbps = 128) {
             if (!currentBuffer || !audioContext) { setStatus("No audio to save"); return; }
             if (typeof lamejs === 'undefined') { setStatus("Error: MP3 encoder not loaded"); return; }
